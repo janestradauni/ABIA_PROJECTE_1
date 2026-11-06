@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Entorno y editores
+.env
+.vscode/
+.idea/
+.claude/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Enunciado de la asignatura (no se publica)
+*.pdf
