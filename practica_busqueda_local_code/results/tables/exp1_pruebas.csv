@@ -1,0 +1,6 @@
+comparacion,diferencia_media,gana,pierde,empata,p_t_pareada,p_signos
+all - move,19751.47,8,0,2,0.06332628747975622,0.0078125
+all - move_close,539.55,5,0,5,0.1140678268862241,0.0625
+move_close - move,19211.92,4,0,6,0.071964453962116,0.125
+move_replace - move,477.5,4,0,6,0.1436014652732817,0.125
+move_swap - move,0.0,0,0,10,,

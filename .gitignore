@@ -20,3 +20,6 @@ desktop.ini
 
 # Enunciado de la asignatura (no se publica)
 *.pdf
+
+# Libreria AIMA (se descarga aparte)
+aima-python-master/

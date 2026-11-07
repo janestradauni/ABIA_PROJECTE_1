@@ -1,0 +1,20 @@
+250 clientes: 10 instancias factibles
+500 clientes: 10 instancias factibles
+750 clientes: 10 instancias factibles
+1000 clientes: 10 instancias factibles
+1250 clientes: 10 instancias factibles
+1500 clientes: 7 instancias factibles
+1750 clientes: 0 instancias factibles
+2000 clientes: 0 instancias factibles
+40 centrales: 10 instancias factibles
+80 centrales: 10 instancias factibles
+120 centrales: 10 instancias factibles
+160 centrales: 10 instancias factibles
+200 centrales: 10 instancias factibles
+240 centrales: 10 instancias factibles
+exp4: 20/117 (3 s)
+exp4: 40/117 (5 s)
+exp4: 60/117 (7 s)
+exp4: 80/117 (31 s)
+exp4: 100/117 (152 s)
+exp4: 117/117 (374 s)

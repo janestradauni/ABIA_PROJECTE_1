@@ -1,0 +1,3 @@
+initial,n,inicial_media,inicial_desv,final_media,final_desv,pasos_media,pasos_desv,segundos_media,segundos_desv,servidos_media,servidos_desv
+greedy,10,1197998.66,75379.96,1220106.43,90672.65,3.3,2.98,0.66,0.41,917.4,89.29
+random,50,789834.34,76253.39,869516.22,54818.92,6.64,1.64,0.61,0.15,753.64,8.91
