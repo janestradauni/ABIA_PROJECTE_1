@@ -71,8 +71,9 @@ def summarize(data: pd.DataFrame, by: list[str], **columns: str) -> pd.DataFrame
 
 def save_table(table: pd.DataFrame, name: str) -> pd.DataFrame:
   """Guarda la tabla redondeada y la devuelve."""
-  # Las probabilidades pueden ser muy pequenas: redondearlas las dejaria en cero.
-  decimals = {column: 2 for column in table.columns if not column.startswith("p_")}
+  # Las probabilidades y lambda son muy pequenas: redondearlas las dejaria en cero.
+  decimals = {column: 2 for column in table.columns
+              if not column.startswith("p_") and column != "lam"}
   table = table.round(decimals)
   table.to_csv(TABLES / f"{name}.csv", index=False)
   return table
@@ -235,6 +236,8 @@ def experiment_4() -> dict:
   """Escalado del tiempo."""
   data = load(4)
   data["centrales"] = data["plants_a"] + data["plants_b"] + data["plants_c"]
+  # El escenario de 1000 clientes y 40 centrales esta en las dos series.
+  data = data.drop_duplicates(["seed", "n_customers", "centrales"])
   customers = summarize(data[data["centrales"] == 40], ["n_customers"],
                         segundos="seconds", pasos="steps", beneficio="profit")
   plants = summarize(data[data["n_customers"] == 1000], ["centrales"],
