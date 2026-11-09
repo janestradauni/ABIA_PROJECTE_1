@@ -40,7 +40,7 @@ def check_random_walk(steps: int = 3000) -> None:
 
 
 def check_all_successors() -> None:
-  """Comprueba cada sucesor de Hill Climbing, sin muestrear."""
+  """Comprueba una muestra determinista de los sucesores de Hill Climbing."""
   instance = build_instance(3)
   state = greedy_initial_state(instance)
   actions = all_actions(state, OPERATOR_SETS["all"])
