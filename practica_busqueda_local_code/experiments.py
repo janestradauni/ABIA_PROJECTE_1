@@ -3,7 +3,7 @@ PROJECT: PRACTICAL ASSIGNMENT OF ABIA (UPC)
 AUTHORS: ...
 DESCRIPTION:
   Ejecuta los experimentos del enunciado y guarda una fila por ejecucion en
-  results/expN.csv. Todas las configuraciones usan las mismas semillas.
+  results/revised/expN.csv. Las comparaciones comparten las semillas.
   Run with: python experiments.py 1 2 [--workers 14].
 """
 
@@ -14,7 +14,10 @@ from pathlib import Path
 from time import perf_counter
 from customers import generate_customers
 from energy_problem import (
+  BASE_OPERATOR_NAMES,
   OPERATOR_SETS,
+  calibrate_schedule,
+  polish_transport,
   run_hill_climbing,
   run_simulated_annealing,
 )
@@ -28,7 +31,7 @@ from energy_state import (
 )
 from power_plants import generate_power_plants
 
-RESULTS_DIR = Path(__file__).resolve().parent / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "results" / "revised"
 
 # Escenario base del enunciado.
 BASE_PLANTS = (5, 10, 25)
@@ -66,7 +69,9 @@ PLANT_MULTIPLIERS = (1, 2, 3, 4, 5, 6)
 FIELDS = ("experiment", "algorithm", "operators", "initial", "seed", "repeat",
           "n_customers", "plants_a", "plants_b", "plants_c", "penalty",
           "k", "lam", "limit", "stiter", "initial_profit", "profit", "steps",
-          "seconds", "served", "guaranteed_unserved", "valid",
+          "seconds", "initialization_seconds", "calibration_seconds", "total_seconds",
+          "iterations", "fallbacks", "stop_reason", "target_acceptance", "calibration_loss",
+          "polish", "transport_loss_mw", "served", "guaranteed_unserved", "valid",
           "running_a", "running_b", "running_c",
           "used_a", "used_b", "used_c", "demand_served")
 
@@ -101,6 +106,7 @@ def describe(state: State) -> dict:
     used[plant.plant_type] += state.used_mw[index]
 
   served = [c for c, p in enumerate(state.assignment) if p != UNSERVED]
+  demand_served = sum(instance.customers[c].demand_mw for c in served)
   return {
     "profit": round(state.profit(), 2),
     "steps": state.steps,
@@ -112,12 +118,14 @@ def describe(state: State) -> dict:
     "running_a": running[0], "running_b": running[1], "running_c": running[2],
     "used_a": round(used[0], 2), "used_b": round(used[1], 2),
     "used_c": round(used[2], 2),
-    "demand_served": round(sum(instance.customers[c].demand_mw for c in served), 2),
+    "demand_served": round(demand_served, 2),
+    "transport_loss_mw": round(sum(used) - demand_served, 2),
   }
 
 
 def run_task(task: dict) -> dict:
   """Ejecuta una busqueda completa. Devuelve una fila del CSV."""
+  total_start = perf_counter()
   plants = task["plants"]
   row = {
     "experiment": task["experiment"], "algorithm": task["algorithm"],
@@ -125,23 +133,39 @@ def run_task(task: dict) -> dict:
     "seed": task["seed"], "repeat": task.get("repeat", 0),
     "n_customers": task["n_customers"], "plants_a": plants[0],
     "plants_b": plants[1], "plants_c": plants[2],
-    "penalty": task.get("penalty", ""),
+    "penalty": task.get("penalty", ""), "polish": task.get("polish", ""),
   }
   instance = build_instance(task["seed"], plants, task["n_customers"],
                             task.get("penalty"))
   # Cada repeticion aleatoria usa su propia semilla, sin cambiar la instancia.
   run_seed = task["seed"] * 1000 + task.get("repeat", 0)
+  init_start = perf_counter()
   initial = initial_state(instance, task["initial"], run_seed)
+  row["initialization_seconds"] = round(perf_counter() - init_start, 6)
   operators = OPERATOR_SETS[task["operators"]]
 
+  sa = task.get("sa")
+  if "target_acceptance" in task:
+    calibration_start = perf_counter()
+    sa, loss = calibrate_schedule(
+      initial, operators, run_seed + 1, limit=sa["limit"], stiter=sa["stiter"],
+      target_acceptance=task["target_acceptance"])
+    row.update(target_acceptance=task["target_acceptance"], calibration_loss=loss,
+               calibration_seconds=round(perf_counter() - calibration_start, 4))
   start = perf_counter()
   if task["algorithm"] == "hc":
     final = run_hill_climbing(initial, operators, run_seed)
+    if task.get("polish"):
+      final = polish_transport(final)
+      if task["polish"] == "resume":
+        final = run_hill_climbing(final, operators, run_seed)
   else:
-    sa = task["sa"]
     row.update(sa)
-    final = run_simulated_annealing(initial, operators, run_seed, **sa)
+    metrics = {}
+    final = run_simulated_annealing(initial, operators, run_seed, **sa, metrics=metrics)
+    row.update(metrics)
   row["seconds"] = round(perf_counter() - start, 4)
+  row["total_seconds"] = round(perf_counter() - total_start, 4)
 
   row["initial_profit"] = round(initial.profit(), 2)
   row.update(describe(final))
@@ -177,7 +201,7 @@ def feasible_seeds(plants: tuple, n_customers: int, count: int = 10,
 def experiment_1() -> list[dict]:
   """Compara los conjuntos de operadores con Hill Climbing."""
   return [task(1, "hc", seed, operators=name, initial=initial, repeat=repeat)
-          for name in OPERATOR_SETS
+          for name in BASE_OPERATOR_NAMES
           for initial, repeats in (("greedy", 1), ("random", RANDOM_STARTS))
           for seed in SEEDS
           for repeat in range(repeats)]
@@ -217,10 +241,13 @@ def experiment_4() -> list[dict]:
   """Mide el tiempo de Hill Climbing al crecer clientes y centrales."""
   tasks = []
   for n_customers in CUSTOMER_STEPS:
-    seeds = feasible_seeds(BASE_PLANTS, n_customers)
+    max_seed = 101 if n_customers == 1500 else 60
+    seeds = feasible_seeds(BASE_PLANTS, n_customers, max_seed=max_seed)
     print(f"{n_customers} clientes: {len(seeds)} instancias factibles", flush=True)
     tasks += [task(4, "hc", seed, n_customers=n_customers) for seed in seeds]
   for multiplier in PLANT_MULTIPLIERS:
+    if multiplier == 1:
+      continue  # El escenario base ya esta en la serie de clientes.
     plants = tuple(n * multiplier for n in BASE_PLANTS)
     seeds = feasible_seeds(plants, BASE_CUSTOMERS)
     print(f"{sum(plants)} centrales: {len(seeds)} instancias factibles", flush=True)
@@ -261,23 +288,70 @@ def experiment_6() -> list[dict]:
           for seed in SEEDS]
 
 
+def experiment_7() -> list[dict]:
+  """Compara HC con y sin apertura en bloque."""
+  return [task(7, "hc", seed, operators=operators)
+          for operators in ("all", "all_open_batch") for seed in SEEDS]
+
+
+def experiment_8() -> list[dict]:
+  """Aisla el efecto de la temperatura y de la insercion con recolocacion."""
+  settings = dict(SA_PARAMS, limit=20000)
+  tasks = []
+  for penalty in (3200.0, 6400.0, 51200.0):
+    for operators in ("all", "all_relocate"):
+      for seed in SEEDS:
+        base = dict(initial="empty", penalty=penalty, operators=operators)
+        tasks.append(task(8, "hc", seed, **base))
+        tasks.append(task(8, "sa", seed, **base, sa=settings))
+        for acceptance in (0.25, 0.7):
+          tasks.append(task(8, "sa", seed, **base, sa=settings, target_acceptance=acceptance))
+  return tasks
+
+
+def experiment_9() -> list[dict]:
+  """Evalua el desempate de transporte y una nueva ronda economica."""
+  return [task(9, "hc", seed, plants=(5, 10, plants_c), polish=polish)
+          for plants_c in (25, 50, 75) for polish in ("", "transport", "resume")
+          for seed in SEEDS]
+
+
 # El 30, el 50 y el 51 son rondas adicionales de los experimentos 3 y 5.
 EXPERIMENTS = {1: experiment_1, 2: experiment_2, 3: experiment_3,
                30: experiment_3_refined, 4: experiment_4, 5: experiment_5,
                50: experiment_5_extended, 51: experiment_5_nearest,
-               6: experiment_6}
+               6: experiment_6, 7: experiment_7, 8: experiment_8, 9: experiment_9}
 
 
 def main() -> None:
   parser = ArgumentParser(description=__doc__)
   parser.add_argument("experiments", nargs="+", type=int, choices=EXPERIMENTS)
   parser.add_argument("--workers", type=int, default=14)
+  parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
+  parser.add_argument("--seed", type=int, action="append", help="limita las semillas para pruebas")
+  parser.add_argument("--algorithm", choices=("hc", "sa"), help="limita el algoritmo")
+  parser.add_argument("--customers", type=int, help="limita el numero de clientes")
+  parser.add_argument("--sa-iterations", type=int, help="sobrescribe el limite de SA para pruebas")
   args = parser.parse_args()
-  RESULTS_DIR.mkdir(exist_ok=True)
+  args.output_dir.mkdir(parents=True, exist_ok=True)
 
   for number in args.experiments:
     tasks = EXPERIMENTS[number]()
-    path = RESULTS_DIR / f"exp{number}.csv"
+    if args.seed:
+      tasks = [item for item in tasks if item["seed"] in args.seed]
+    if args.algorithm:
+      tasks = [item for item in tasks if item["algorithm"] == args.algorithm]
+    if args.customers is not None:
+      tasks = [item for item in tasks if item["n_customers"] == args.customers]
+    if not tasks:
+      parser.error(f"ninguna tarea coincide con los filtros del experimento {number}")
+    if args.sa_iterations is not None:
+      for item in tasks:
+        if item["algorithm"] == "sa":
+          if args.sa_iterations <= 0 or args.sa_iterations % item["sa"]["stiter"]:
+            parser.error("--sa-iterations debe ser positivo y multiplo de stiter")
+          item["sa"] = dict(item["sa"], limit=args.sa_iterations)
+    path = args.output_dir / f"exp{number}.csv"
     start = perf_counter()
     with (path.open("w", newline="", encoding="utf-8") as file,
           Pool(args.workers) as pool):

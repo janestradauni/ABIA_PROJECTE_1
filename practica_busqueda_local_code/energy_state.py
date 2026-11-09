@@ -38,7 +38,11 @@ RANDOM_MAX_LOSS = 0.2
 #   (SWAP, cliente1, cliente2): dos clientes servidos intercambian central.
 #   (REPLACE, sin_servicio, servido): el primero ocupa el lugar del segundo.
 #   (CLOSE, central, plan): para la central; plan es ((cliente, destino), ...).
+#   (OPEN_BATCH, central, plan): arranca una central para varios clientes.
+#   (INSERT_RELOCATE, central, plan): recoloca un cliente e inserta un garantizado.
 MOVE, SWAP, REPLACE, CLOSE = range(4)
+OPEN_BATCH, INSERT_RELOCATE = range(4, 6)
+PLAN_ACTIONS = (CLOSE, OPEN_BATCH, INSERT_RELOCATE)
 
 
 class InfeasibleError(Exception):
@@ -122,17 +126,27 @@ class Instance:
     self.reference_cost = fsum(self.stopped_cost)
 
     self._neighbors: dict[int, list[list[int]]] = {}
+    self._swap_pairs: dict[int, tuple[tuple[int, int], ...]] = {}
 
   def neighbors(self, k: int) -> list[list[int]]:
     """Devuelve, para cada cliente, sus k clientes mas cercanos."""
     if k not in self._neighbors:
-      xy = np.array([(c.x, c.y) for c in self.customers], dtype=float)
+      xy = np.array([(c.x, c.y) for c in self.customers], dtype=float).reshape(-1, 2)
       distance = np.hypot(xy[:, None, 0] - xy[None, :, 0],
                           xy[:, None, 1] - xy[None, :, 1])
       np.fill_diagonal(distance, np.inf)
-      order = np.argsort(distance, axis=1, kind="stable")[:, :k]
+      order = np.argsort(distance, axis=1, kind="stable")[:, :min(k, max(0, self.n_customers - 1))]
       self._neighbors[k] = [sorted(row) for row in order.tolist()]
     return self._neighbors[k]
+
+  def swap_pairs(self, k: int) -> tuple[tuple[int, int], ...]:
+    """Parejas unicas si al menos uno es vecino cercano del otro."""
+    if k not in self._swap_pairs:
+      pairs = {(min(first, second), max(first, second))
+               for first, neighbors in enumerate(self.neighbors(k))
+               for second in neighbors}
+      self._swap_pairs[k] = tuple(sorted(pairs))
+    return self._swap_pairs[k]
 
 
 class State:
@@ -281,7 +295,7 @@ class State:
 
   def successor(self, action: tuple) -> "State":
     """Devuelve el estado sucesor, con su valor pero aun sin construir."""
-    if action[0] == CLOSE:
+    if action[0] in PLAN_ACTIONS:
       state = self.copy()
       state._apply(action)
       state.refresh()
